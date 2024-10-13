@@ -1,7 +1,7 @@
 pyrofork
 tgcrypto
 pymongo[srv]
-motor
+motor==2.5.1
 marshmallow
 umongo
 requests
