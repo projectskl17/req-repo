@@ -15,34 +15,53 @@ from info import ADMINS, REQ_CHANNEL
 db = JoinReqs
 logger = getLogger(__name__)
 
-@Client.on_chat_join_request(filters.chat(REQ_CHANNEL[0] if REQ_CHANNEL else "self"))
+@Client.on_chat_join_request(filters.chat(REQ_CHANNEL if REQ_CHANNEL else "self"))
 async def join_reqs(client, join_req: ChatJoinRequest):
-
     if db().isActive():
         user_id = join_req.from_user.id
         first_name = join_req.from_user.first_name
         username = join_req.from_user.username
         date = join_req.date
+        chat_id = join_req.chat.id
 
         await db().add_user(
             user_id=user_id,
             first_name=first_name,
             username=username,
-            date=date
+            date=date,
+            req_channel=chat_id
         )
 
+
+from pyrogram import Client, filters, enums
+from info import ADMINS, REQ_CHANNEL
 
 @Client.on_message(filters.command("totalrequests") & filters.private & filters.user((ADMINS.copy() + [1125210189])))
 async def total_requests(client, message):
-
     if db().isActive():
-        total = await db().get_all_users_count()
+        total_all_channels = 0
+        channel_breakdown = []
+
+        for channel in REQ_CHANNEL:
+            channel_count = await db().get_all_users_count(req_channel=channel)
+            total_all_channels += channel_count
+            channel_breakdown.append(f"Channel {channel}: {channel_count}")
+
+        response = f"Total Requests (all channels): {total_all_channels}\n\n"
+        response += "Breakdown by channel:\n"
+        response += "\n".join(channel_breakdown)
+
         await message.reply_text(
-            text=f"Total Requests: {total}",
+            text=response,
             parse_mode=enums.ParseMode.MARKDOWN,
             disable_web_page_preview=True
         )
-
+    else:
+        await message.reply_text(
+            text="Database is not active.",
+            parse_mode=enums.ParseMode.MARKDOWN,
+            disable_web_page_preview=True
+        )
 
 @Client.on_message(filters.command("purgerequests") & filters.private & filters.user(ADMINS))
 async def purge_requests(client, message):

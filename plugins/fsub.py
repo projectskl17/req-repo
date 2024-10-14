@@ -16,6 +16,26 @@ logger = getLogger(__name__)
 INVITE_LINKS = {}
 db = JoinReqs
 
+async def check_user_join_request(update):
+    if REQ_CHANNEL and db().isActive():
+        try:
+            # Check if User is Requested to Join Any of the Channels
+            for channel in REQ_CHANNEL:
+                user = await db().get_user(update.from_user.id, req_channel=channel)
+                if user and user["user_id"] == update.from_user.id:
+                    return True
+            return False  # User not found in any channel
+        except Exception as e:
+            logger.exception(e, exc_info=True)
+            await update.reply(
+                text="Something went Wrong.",
+                parse_mode=enums.ParseMode.MARKDOWN,
+                disable_web_page_preview=True
+            )
+            return False
+    return False
+
+
 async def ForceSub(bot: Client, update: Message, file_id: str = False, mode="checksub"):
 
     global INVITE_LINKS
@@ -61,8 +81,8 @@ async def ForceSub(bot: Client, update: Message, file_id: str = False, mode="che
     if REQ_CHANNEL and db().isActive():
         try:
             # Check if User is Requested to Join Channel
-            user = await db().get_user(update.from_user.id)
-            if user and user["user_id"] == update.from_user.id:
+            is_valid = await check_user_join_request(update)
+            if is_valid:
                 return True
         except Exception as e:
             logger.exception(e, exc_info=True)
