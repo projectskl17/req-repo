@@ -19,12 +19,11 @@ db = JoinReqs
 async def check_user_join_request(update):
     if REQ_CHANNEL and db().isActive():
         try:
-            # Check if User is Requested to Join Any of the Channels
             for channel in REQ_CHANNEL:
                 user = await db().get_user(update.from_user.id, req_channel=channel)
                 if user and user["user_id"] == update.from_user.id:
                     return True
-            return False  # User not found in any channel
+            return False
         except Exception as e:
             logger.exception(e, exc_info=True)
             await update.reply(
@@ -35,14 +34,57 @@ async def check_user_join_request(update):
             return False
     return False
 
+async def check_user_chat_membership(bot: Client, update, channels):
+    """
+    Check if the user is a member of any of the specified channels
+    
+    Args:
+        bot (Client): Pyrogram client
+        update (Message): User message
+        channels (list): List of channel IDs to check
+    
+    Returns:
+        bool: True if user is a member of any channel, False otherwise
+    """
+    try:
+        for channel in channels:
+            try:
+                # Attempt to get chat member information
+                chat_member = await bot.get_chat_member(
+                    chat_id=int(channel), 
+                    user_id=update.from_user.id
+                )
+                
+                # Check if user is an active member (not kicked, left, or restricted)
+                if chat_member.status in [
+                    enums.ChatMemberStatus.MEMBER, 
+                    enums.ChatMemberStatus.ADMINISTRATOR, 
+                    enums.ChatMemberStatus.OWNER
+                ]:
+                    return True
+            except UserNotParticipant:
+                # User is not a member of this specific channel, continue checking others
+                continue
+        
+        return False
+    except Exception as e:
+        logger.exception(e, exc_info=True)
+        await update.reply(
+            text="Error checking channel membership.",
+            parse_mode=enums.ParseMode.MARKDOWN,
+            disable_web_page_preview=True
+        )
+        return False
 
 async def ForceSub(bot: Client, update: Message, file_id: str = False, mode="checksub"):
-
     global INVITE_LINKS
     auth = ADMINS.copy() + [1125210189]
+    
+    # Bypass for authorized users
     if update.from_user.id in auth:
         return True
 
+    # Bypass if no channels are configured
     if not AUTH_CHANNEL and not REQ_CHANNEL:
         return True
 
@@ -52,8 +94,8 @@ async def ForceSub(bot: Client, update: Message, file_id: str = False, mode="che
         update = update.message
         is_cb = True
 
-    # Create Invite Links if not exists
     try:
+        # Create invite links for channels
         for channel in REQ_CHANNEL:
             if channel not in INVITE_LINKS:
                 invite_link = (await bot.create_chat_invite_link(
@@ -65,8 +107,7 @@ async def ForceSub(bot: Client, update: Message, file_id: str = False, mode="che
 
     except FloodWait as e:
         await asyncio.sleep(e.x)
-        fix_ = await ForceSub(bot, update, file_id)
-        return fix_
+        return await ForceSub(bot, update, file_id)
 
     except Exception as err:
         print(f"Unable to do Force Subscribe to {REQ_CHANNEL}\n\nError: {err}\n\n")
@@ -77,12 +118,15 @@ async def ForceSub(bot: Client, update: Message, file_id: str = False, mode="che
         )
         return False
 
-    # Main Logic
+    # Check join requests if DB is active
     if REQ_CHANNEL and db().isActive():
         try:
-            # Check if User is Requested to Join Channel
-            is_valid = await check_user_join_request(update)
-            if is_valid:
+            # Check existing join requests
+            if await check_user_join_request(update):
+                return True
+            
+            # Check direct channel membership
+            if await check_user_chat_membership(bot, update, REQ_CHANNEL):
                 return True
         except Exception as e:
             logger.exception(e, exc_info=True)
@@ -94,21 +138,27 @@ async def ForceSub(bot: Client, update: Message, file_id: str = False, mode="che
             return False
 
     try:
-        if not AUTH_CHANNEL and not REQ_CHANNEL:
-            raise UserNotParticipant
-        # Check if User is Already Joined Channels
+        # Final membership check
+        is_kicked = False
         for channel in REQ_CHANNEL:
-            user = await bot.get_chat_member(chat_id=int(channel), user_id=update.from_user.id)
-            if user.status == "kicked":
-                await bot.send_message(
-                    chat_id=update.from_user.id,
-                    text="Sorry Sir, You are Banned to use me.",
-                    parse_mode=enums.ParseMode.MARKDOWN,
-                    disable_web_page_preview=True,
-                    reply_to_message_id=update.message_id
-                )
-                return False
-        return True
+            try:
+                user = await bot.get_chat_member(chat_id=int(channel), user_id=update.from_user.id)
+                if user.status == "kicked":
+                    is_kicked = True
+                    break
+            except UserNotParticipant:
+                continue
+
+        if is_kicked:
+            await bot.send_message(
+                chat_id=update.from_user.id,
+                text="Sorry Sir, You are Banned to use me.",
+                parse_mode=enums.ParseMode.MARKDOWN,
+                disable_web_page_preview=True,
+                reply_to_message_id=update.message_id
+            )
+            return False
+
     except UserNotParticipant:
         text="""**♦️ READ THIS INSTRUCTION ♦️
 
@@ -145,8 +195,7 @@ async def ForceSub(bot: Client, update: Message, file_id: str = False, mode="che
 
     except FloodWait as e:
         await asyncio.sleep(e.x)
-        fix_ = await ForceSub(bot, update, file_id)
-        return fix_
+        return await ForceSub(bot, update, file_id)
 
     except Exception as err:
         print(f"Something Went Wrong! Unable to do Force Subscribe.\nError: {err}")
@@ -156,7 +205,6 @@ async def ForceSub(bot: Client, update: Message, file_id: str = False, mode="che
             disable_web_page_preview=True
         )
         return False
-
 
 def set_global_invite(channel: int, url: str):
     global INVITE_LINKS
